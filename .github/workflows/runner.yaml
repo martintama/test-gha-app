@@ -22,6 +22,7 @@ on:
       runner_name:
         description: 'Runner name (label for "runs-on")'
         required: true
+        default: team-tama
       destroy:
         description: 'Destroy infrastructure instead of deploying'
         type: boolean
