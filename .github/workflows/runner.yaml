@@ -1,0 +1,85 @@
+name: Deploy GitHub Self-Hosted Runners
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance_type:
+        description: 'EC2 instance type'
+        required: true
+        default: 't3.small'
+      min_instances:
+        description: 'Minimum number of instances'
+        required: true
+        default: '1'
+      max_instances:
+        description: 'Maximum number of instances'
+        required: true
+        default: '2'
+      desired_instances:
+        description: 'Desired number of instances'
+        required: true
+        default: '1'
+      runner_name:
+        description: 'Runner name (label for "runs-on")'
+        required: true
+      destroy:
+        description: 'Destroy infrastructure instead of deploying'
+        type: boolean
+        default: false
+        required: true
+
+env:
+  REPO_OWNER: ${{ github.repository_owner }}
+  REPO_NAME: ${{ github.event.repository.name }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  
+jobs:
+  terraform:
+    runs-on: platform-runners # These are existing company-wide self-hosted runners
+    defaults:
+      run:
+        working-directory: ./terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.7.0
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Create tfvars file
+        run: |
+          # Use the input parameters from workflow_dispatch
+          cat > terraform.tfvars <<EOF
+          github_owner = "${{ env.REPO_OWNER }}"
+          github_repo = "${{ env.REPO_NAME }}"
+          github_token = "${{ secrets.GITHUB_TOKEN }}"
+          instance_type = "${{ github.event.inputs.instance_type }}"
+          ssh_keypair_name = "${{ secrets.SSH_KEYPAIR_NAME }}"
+          subnet_ids = ${{ vars.EC2_SUBNET_ID }}
+          
+          runner_config = {
+            min_instances     = ${{ github.event.inputs.min_instances }}
+            max_instances     = ${{ github.event.inputs.max_instances }}
+            desired_instances = ${{ github.event.inputs.desired_instances }}
+            name              = "${{ github.event.inputs.runner_name }}"
+          }
+          EOF
+      
+      - name: Terraform Plan
+        if: ${{ !inputs.destroy }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Plan (Destroy)
+        if: ${{ inputs.destroy }}
+        run: terraform plan -destroy -out=tfplan
+      
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
